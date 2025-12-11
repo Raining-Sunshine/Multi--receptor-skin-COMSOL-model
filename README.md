@@ -1,0 +1,1 @@
+Please cite Du, Y., Shen, P., Liu, H., Zhang, Y., Jia, L., Pu, X., Yang, F., Ren, T., Chu, D., Wang, Z., & Wei, D. (2024). Multi-receptor skin with highly sensitive tele-perception somatosensory. Science Advances, 10(37), eadp8681. https://doi.org/doi:10.1126/sciadv.adp8681 
