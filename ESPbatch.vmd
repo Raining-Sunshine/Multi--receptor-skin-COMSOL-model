@@ -5,8 +5,14 @@
 # Requires per system i:
 #   mol{i}.pdb
 #   vtx{i}.pdb
-# Optional (recommended):
+# Optional:
 #   surfanalysis{i}.pdb
+#
+# View behavior (no first_pass flag):
+#   - If VIEWFILE does NOT exist: save current view (sv)
+#   - If VIEWFILE exists: load view (lv)
+#
+# ColorBar is fed with ::ColorBar::view_list_override (closed module)
 # ============================================================
 
 # ---------- Global display settings ----------
@@ -16,13 +22,16 @@ axes location Off
 display depthcue off
 display rendermode Normal
 
+# Load colorbar library
+source colorbar.tcl
+namespace import ::ColorBar::*
+
 # ---------- User parameters ----------
-set colorlow  -22
-set colorhigh  22
 set ptsize     0.2
-set outdir    "put the path of the output directorie here"   ;# Windows: use / or \\
-# ---------- Global shift before render ----------
-set SHIFT_LEFT {-3.0 0.0 0.0}   ;# move left in x (adjust magnitude if needed)
+set outdir     " "            ;# output folder path
+set winsize    {1024 768}     ;# drawing window size
+set SHIFT_LEFT {-4.0 0.0 0.0}
+set VIEWFILE   "view.txt"
 
 file mkdir $outdir
 
@@ -34,23 +43,16 @@ proc refresh_display {} {
 
 # ---------- Helper: auto-detect system indices ----------
 proc detect_system_indices {} {
-    # Find all mol*.pdb files in current working directory
     set molfiles [glob -nocomplain "mol*.pdb"]
     set idxlist {}
-
     foreach f $molfiles {
-        # Match mol{number}.pdb
         if {[regexp {^mol([0-9]+)\.pdb$} $f -> idx]} {
-            # Require corresponding vtx{idx}.pdb
             if {[file exists "vtx${idx}.pdb"]} {
                 lappend idxlist [expr {int($idx)}]
             }
         }
     }
-
-    # unique + sort increasing
-    set idxlist [lsort -unique -integer $idxlist]
-    return $idxlist
+    return [lsort -unique -integer $idxlist]
 }
 
 # ---------- Helper: shift molecule ----------
@@ -60,15 +62,43 @@ proc shift_mol {molid vec} {
     $sel delete
 }
 
+# ============================================================
+# sv/lv: save/load window size + view matrices
+# ============================================================
+proc sv {{fname "view.txt"}} {
+    set fh [open $fname w]
+    puts $fh [display get size]
+    puts $fh [molinfo top get {center_matrix rotate_matrix scale_matrix global_matrix}]
+    close $fh
+}
+
+# lv applies view to all molecules except colorbar, returns view (as read)
+proc lv {{fname "view.txt"}} {
+    if {![file exists $fname]} {
+        puts "ERROR: $fname not found."
+        return ""
+    }
+    set fh [open $fname r]
+    gets $fh winsize_line
+    gets $fh view
+    close $fh
+
+    eval display resize $winsize_line
+
+    foreach id [molinfo list] {
+        set nm [string tolower [molinfo $id get name]]
+        if {[string match "*colorbar*" $nm]} { continue }
+        molinfo $id set {center_matrix rotate_matrix scale_matrix global_matrix} $view
+    }
+    return $view
+}
 
 # ---------- Detect systems ----------
 set systems [detect_system_indices]
 if {[llength $systems] == 0} {
     puts "ERROR: No valid systems found. Need mol{i}.pdb and vtx{i}.pdb in current folder."
-    quit
+    return
 }
-
-puts "Detected systems: $systems"
 
 # ============================================================
 # Main loop over detected indices
@@ -77,11 +107,11 @@ foreach i $systems {
 
     puts "=== Processing system $i ==="
 
-    # ---- Load files and record molids explicitly ----
+    # ---- Load files ----
     set molid_mol  [mol new "mol$i.pdb"  waitfor all]
     set molid_vtx  [mol new "vtx$i.pdb"  waitfor all]
 
-    # surfanalysis is optional; only load if present
+    # Optional surfanalysis
     set has_surf 0
     if {[file exists "surfanalysis$i.pdb"]} {
         set molid_surf [mol new "surfanalysis$i.pdb" waitfor all]
@@ -95,7 +125,6 @@ foreach i $systems {
     # ---- vtx representation (ESP dots) ----
     mol modcolor 0 $molid_vtx Beta
     mol modstyle 0 $molid_vtx Dotted $ptsize
-    mol scaleminmax $molid_vtx 0 $colorlow $colorhigh
 
     # ---- surfanalysis extrema (vdW surface) ----
     if {$has_surf} {
@@ -109,11 +138,45 @@ foreach i $systems {
         mol modcolor 1 $molid_surf ColorID 21
     }
 
+    # ---- View stage (logic unchanged; only parameterized winsize) ----
+    mol top $molid_mol
+    eval display resize $winsize
+
+    if {![file exists $VIEWFILE]} {
+        sv $VIEWFILE
+
+        lassign [molinfo top get {center_matrix rotate_matrix scale_matrix global_matrix}] \
+            center_mat rotate_mat scale_mat global_mat
+        regsub -all {[{}]} [list $center_mat $rotate_mat $scale_mat $global_mat] "" vv
+        set view_list [split $vv]
+        if {[llength $view_list] != 64} {
+            set view_list [concat $center_mat $rotate_mat $scale_mat $global_mat]
+        }
+    } else {
+        set view_list [lv $VIEWFILE]
+        if {$view_list eq ""} {
+            # fallback to current top view (no extra checks)
+            lassign [molinfo top get {center_matrix rotate_matrix scale_matrix global_matrix}] \
+                center_mat rotate_mat scale_mat global_mat
+            regsub -all {[{}]} [list $center_mat $rotate_mat $scale_mat $global_mat] "" vv
+            set view_list [split $vv]
+            if {[llength $view_list] != 64} {
+                set view_list [concat $center_mat $rotate_mat $scale_mat $global_mat]
+            }
+        }
+    }
+
     # ---- Apply global left shift to all layers ----
     shift_mol $molid_mol $SHIFT_LEFT
     shift_mol $molid_vtx $SHIFT_LEFT
-    if {$has_surf} {
-        shift_mol $molid_surf $SHIFT_LEFT
+    if {$has_surf} { shift_mol $molid_surf $SHIFT_LEFT }
+
+    # ---- Create colorbar (closed module) ----
+    set cb -1
+    if {[llength $view_list] == 64} {
+        set ::ColorBar::view_list_override $view_list
+        color_scale_bar
+        set cb $::ColorBar::bar_mol
     }
 
     # ====================================================
@@ -121,16 +184,18 @@ foreach i $systems {
     # ====================================================
     mol on  $molid_mol
     mol off $molid_vtx
+    if {$cb != -1} { mol off $cb }
     if {$has_surf} { mol on $molid_surf }
 
     refresh_display
     render snapshot "$outdir/bone$i.bmp"
 
     # ====================================================
-    # Render vtx{i}.bmp  (vtx only)
+    # Render vtx{i}.bmp  (vtx + colorbar)
     # ====================================================
     mol off $molid_mol
     mol on  $molid_vtx
+    if {$cb != -1} { mol on $cb }
     if {$has_surf} { mol off $molid_surf }
 
     refresh_display
@@ -140,6 +205,7 @@ foreach i $systems {
     if {$has_surf} { mol delete $molid_surf }
     mol delete $molid_vtx
     mol delete $molid_mol
+    if {$cb != -1} { delete_color_scale_bar }
 }
 
 puts "=== Batch rendering finished ==="

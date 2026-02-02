@@ -27,13 +27,7 @@ app.bringToFront();
     var outFolder = Folder.selectDialog("Select output folder for ESP*.png (Cancel = use input folder)");
     if (!outFolder) outFolder = inFolder;
 
-    var fLegend = new File(inFolder.fsName + "/minmax.bmp");
-    if (!fLegend.exists) {
-        alert("Missing minmax.bmp in:\n" + inFolder.fsName);
-        return;
-    }
-
-    // ===== Settings =====
+       // ===== Settings =====
     // Bone & legend use SAME behavior:
     // Recommended: no deletion; just Multiply so white bg doesn't cover.
     var OVERLAY_USE_MULTIPLY = true;
@@ -274,23 +268,8 @@ app.bringToFront();
             var boneLayer = duplicateLayerTo(docBone, docVtx, "bone" + i);
             closeNoSave(docBone); docBone = null;
 
-            // 3) Open legend(minmax) => apply SAME overlay policy => duplicate to vtx
-            docLegend = app.open(fLegend);
-            front(docLegend);
-            normalizeRGB8(docLegend);
-            unlockAll(docLegend);
-            ensureArtLayerActive(docLegend);
-            matchCanvasToTarget(docLegend, docVtx);
-
-            applyOverlayPolicy(docLegend);
-
-            var legendLayer = duplicateLayerTo(docLegend, docVtx, "legend");
-            closeNoSave(docLegend); docLegend = null;
-
-            // 4) Apply SAME blend rule to BOTH overlays (bone & legend)
             if (OVERLAY_USE_MULTIPLY) {
                 try { boneLayer.blendMode   = BlendMode.MULTIPLY; } catch (eBM1) {}
-                try { legendLayer.blendMode = BlendMode.MULTIPLY; } catch (eBM2) {}
             }
 
             // 5) Export composite (IMPORTANT: export the vtx doc)
@@ -299,7 +278,6 @@ app.bringToFront();
 
             report.push("OK   i=" + i + " -> " + fOut.fsName);
         } catch (err) {
-            if (docLegend) closeNoSave(docLegend);
             if (docBone) closeNoSave(docBone);
             if (docVtx) closeNoSave(docVtx);
             report.push("FAIL i=" + i + " : " + err);
